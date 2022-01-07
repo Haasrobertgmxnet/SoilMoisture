@@ -10,10 +10,12 @@
 #include "driver/gpio.h"
 #include "driver/rtc_io.h"
 #include "driver/adc.h"
+#include "esp_bt.h"
+#include "esp_wifi.h"
 #include "sdkconfig.h"
 
 #define USE_CSTDLIB 1
-#undef USE_CSTDLIB
+//#undef USE_CSTDLIB
 
 #ifdef USE_CSTDLIB
 #include <stdio.h>
@@ -25,17 +27,24 @@
 #endif
 
 const gpio_num_t PWR_SUPPLY_GPIO=CONFIG_PWR_SUPPLY_GPIO;
-#define SENSOR_GPIO CONFIG_SENSOR_GPIO
+#define ADC1_VOLTAGE_CHANNEL ADC1_CHANNEL_3
 #define ADC2_SENSOR_CHANNEL ADC2_CHANNEL_5
 #define SEC_TO_MICROSECS 1000000
 #define MIN_TO_SECS 60
 #define HOUR_TO_SECS 3600
 #define DAY_TO_HOURS 24
-#define TIME_MINS 2
+#define TIME_MINS 1
 
 static const adc_bits_width_t width = ADC_WIDTH_BIT_12;
 static esp_err_t r;
 
+void conf_start(){
+    //Don't need that stuff for this app
+    esp_wifi_stop();
+    //esp_bt_controller_disable();
+    //downscale CPU freq: todo:
+    
+}
 void do_work(){
     PRINT("\nWork\n");
     gpio_pad_select_gpio(PWR_SUPPLY_GPIO);
@@ -45,7 +54,8 @@ void do_work(){
 
     // Prepare Pin 14 for Analog Input
     int read_raw;
-
+    adc1_config_channel_atten( ADC1_VOLTAGE_CHANNEL, ADC_ATTEN_11db );
+    adc1_config_width(width);
     adc2_config_channel_atten( ADC2_SENSOR_CHANNEL, ADC_ATTEN_11db );
     vTaskDelay(2 * portTICK_PERIOD_MS);
 
@@ -59,16 +69,29 @@ void do_work(){
         } else {
             PRINT2("%s\n", esp_err_to_name(r));
         }
+        int raw = adc1_get_raw( ADC1_VOLTAGE_CHANNEL);
+        if ( r == ESP_OK ) {
+            PRINT2("raw voltage: %d\n", raw );
+        } else if ( r == ESP_ERR_INVALID_STATE ) {
+            PRINT2("%s: ADC2 not initialized yet.\n", esp_err_to_name(r));
+        } else {
+            PRINT2("%s\n", esp_err_to_name(r));
+        }
         vTaskDelay( 2 * portTICK_PERIOD_MS );
     }
 }
 
 void hibernate(){
     rtc_gpio_isolate(GPIO_NUM_12);
+    rtc_gpio_isolate(GPIO_NUM_15);
+    //adc_power_off();
+    esp_wifi_stop();
+    //esp_bt_controller_disable();
     esp_sleep_pd_config(ESP_PD_DOMAIN_MAX, ESP_PD_OPTION_OFF);
     esp_sleep_pd_config(ESP_PD_DOMAIN_XTAL, ESP_PD_OPTION_OFF);
     esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_OFF);
     esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_FAST_MEM, ESP_PD_OPTION_OFF);
+    esp_sleep_pd_config(ESP_PD_DOMAIN_VDDSDIO, ESP_PD_OPTION_OFF);
     esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
     esp_sleep_enable_timer_wakeup(TIME_MINS*MIN_TO_SECS*SEC_TO_MICROSECS);
     PRINT("\nGoing to sleep.\n");
@@ -77,6 +100,7 @@ void hibernate(){
 
 void app_main()
 {
+    conf_start();
     do_work();
     hibernate();
 }
